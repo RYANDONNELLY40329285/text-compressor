@@ -1,49 +1,52 @@
 #include "huffman.h"
+#include "lz77.h"
 
 #include <fstream>
-#include <iostream>
+#include <iostream>   
 #include <queue>
 #include <vector>
 #include <unordered_map>
 
-struct Compare
+struct Node
 {
-    bool operator()(Node* a, Node* b)
+    char ch;
+    int freq;
+
+    Node* left;
+    Node* right;
+
+    Node(char c,int f)
     {
-        if (a->freq == b->freq)
-            return a->ch > b->ch;
-        return a->freq > b->freq;
+        ch=c;
+        freq=f;
+        left=nullptr;
+        right=nullptr;
     }
 };
 
-void generateCodes(Node* root,
-                   std::string code,
-                   std::unordered_map<char,std::string>& codes)
+struct Compare
 {
-    if(!root) return;
-
-    if(!root->left && !root->right)
-        codes[root->ch] = code;
-
-    generateCodes(root->left, code + "0", codes);
-    generateCodes(root->right, code + "1", codes);
-}
+    bool operator()(Node* a,Node* b)
+    {
+        return a->freq > b->freq;
+    }
+};
 
 Node* buildTree(std::unordered_map<char,int>& freq)
 {
     std::priority_queue<Node*,std::vector<Node*>,Compare> pq;
 
-    for(auto& p : freq)
+    for(auto&p:freq)
         pq.push(new Node(p.first,p.second));
 
-    while(pq.size() > 1)
+    while(pq.size()>1)
     {
-        Node* left = pq.top(); pq.pop();
-        Node* right = pq.top(); pq.pop();
+        Node* a=pq.top(); pq.pop();
+        Node* b=pq.top(); pq.pop();
 
-        Node* parent = new Node('\0', left->freq + right->freq);
-        parent->left = left;
-        parent->right = right;
+        Node* parent=new Node('\0',a->freq+b->freq);
+        parent->left=a;
+        parent->right=b;
 
         pq.push(parent);
     }
@@ -51,100 +54,102 @@ Node* buildTree(std::unordered_map<char,int>& freq)
     return pq.top();
 }
 
-std::vector<unsigned char> packBits(const std::string& bits)
+void buildCodes(Node* root,std::string code,
+                std::unordered_map<char,std::string>& codes)
 {
-    std::vector<unsigned char> bytes;
+    if(!root) return;
 
-    for(size_t i=0;i<bits.size();i+=8)
-    {
-        std::string byteStr = bits.substr(i,8);
+    if(!root->left && !root->right)
+        codes[root->ch]=code;
 
-        while(byteStr.size()<8)
-            byteStr += "0";
-
-        unsigned char byte = 0;
-
-        for(char c : byteStr)
-        {
-            byte <<= 1;
-            if(c=='1') byte |= 1;
-        }
-
-        bytes.push_back(byte);
-    }
-
-    return bytes;
-}
-
-std::string unpackBits(std::vector<unsigned char>& bytes)
-{
-    std::string bits;
-
-    for(unsigned char b : bytes)
-    {
-        for(int i=7;i>=0;i--)
-            bits += ((b>>i)&1)?'1':'0';
-    }
-
-    return bits;
+    buildCodes(root->left,code+"0",codes);
+    buildCodes(root->right,code+"1",codes);
 }
 
 void Huffman::compressFile(const std::string& inputFile,
                            const std::string& outputFile)
 {
-    std::ifstream in(inputFile);
+    std::ifstream in(inputFile,std::ios::binary);
 
     std::string text((std::istreambuf_iterator<char>(in)),
                       std::istreambuf_iterator<char>());
 
+    auto tokens = lz77Compress(text);
+
+    std::string tokenData;
+
+    for(auto&t:tokens)
+    {
+        tokenData+=(char)(t.offset>>8);
+        tokenData+=(char)(t.offset&255);
+        tokenData+=(char)t.length;
+        tokenData+=t.next;
+    }
+
     std::unordered_map<char,int> freq;
 
-    for(char c : text)
+    for(char c:tokenData)
         freq[c]++;
 
-    Node* root = buildTree(freq);
+    Node* root=buildTree(freq);
 
     std::unordered_map<char,std::string> codes;
-
-    generateCodes(root,"",codes);
+    buildCodes(root,"",codes);
 
     std::string encoded;
 
-    for(char c : text)
-        encoded += codes[c];
-
-    std::vector<unsigned char> packed = packBits(encoded);
+    for(char c:tokenData)
+        encoded+=codes[c];
 
     std::ofstream out(outputFile,std::ios::binary);
 
-    int tableSize = freq.size();
-    out.write((char*)&tableSize,sizeof(tableSize));
+    int size = tokenData.size();
+    out.write((char*)&size,4);
 
-    for(auto& p : freq)
+    int table = freq.size();
+    out.write((char*)&table,4);
+
+    for(auto&p:freq)
     {
-        out.write(&p.first,sizeof(char));
-        out.write((char*)&p.second,sizeof(int));
+        out.write(&p.first,1);
+        out.write((char*)&p.second,4);
     }
 
-    int bitLength = encoded.size();
-    out.write((char*)&bitLength,sizeof(bitLength));
+    int bits = encoded.size();
+    out.write((char*)&bits,4);
 
-    int dataSize = packed.size();
-    out.write((char*)&dataSize,sizeof(dataSize));
+    for(size_t i=0;i<bits;i+=8)
+    {
+        unsigned char byte=0;
 
-    for(auto b : packed)
-        out.put(b);
+        for(int j=0;j<8;j++)
+        {
+            byte<<=1;
 
-    std::cout<<"Compressed to "<<outputFile<<"\n";
+            if(i+j<bits && encoded[i+j]=='1')
+                byte|=1;
+        }
+
+        out.put(byte);
+    }
 }
 
 void Huffman::decompressFile(const std::string& inputFile,
                              const std::string& outputFile)
 {
-    std::ifstream in(inputFile,std::ios::binary);
+    std::ifstream in(inputFile, std::ios::binary);
+
+    if(!in)
+    {
+        std::cerr<<"Error opening compressed file\n";
+        return;
+    }
+
+    int tokenSize;
+    in.read((char*)&tokenSize,4);
 
     int tableSize;
-    in.read((char*)&tableSize,sizeof(tableSize));
+    in.read((char*)&tableSize,4);
 
     std::unordered_map<char,int> freq;
 
@@ -153,46 +158,69 @@ void Huffman::decompressFile(const std::string& inputFile,
         char c;
         int f;
 
-        in.read(&c,sizeof(char));
-        in.read((char*)&f,sizeof(int));
+        in.read(&c,1);
+        in.read((char*)&f,4);
 
-        freq[c]=f;
+        freq[c] = f;
     }
 
     Node* root = buildTree(freq);
 
     int bitLength;
-    in.read((char*)&bitLength,sizeof(bitLength));
+    in.read((char*)&bitLength,4);
 
-    int dataSize;
-    in.read((char*)&dataSize,sizeof(dataSize));
+    std::vector<unsigned char> bytes;
 
-    std::vector<unsigned char> bytes(dataSize);
+    while(in.peek()!=EOF)
+        bytes.push_back(in.get());
 
-    for(int i=0;i<dataSize;i++)
-        bytes[i]=in.get();
+    std::string bits;
 
-    std::string bits = unpackBits(bytes);
+    for(unsigned char b : bytes)
+    {
+        for(int i=7;i>=0;i--)
+            bits += ((b>>i)&1)?'1':'0';
+    }
 
     bits = bits.substr(0,bitLength);
 
-    std::ofstream out(outputFile);
+    std::string decoded;
 
     Node* current = root;
 
     for(char bit : bits)
     {
         if(bit=='0')
-            current = current->left;
+            current=current->left;
         else
-            current = current->right;
+            current=current->right;
 
         if(!current->left && !current->right)
         {
-            out<<current->ch;
-            current = root;
+            decoded+=current->ch;
+            current=root;
         }
     }
 
-    std::cout<<"Decompressed to "<<outputFile<<"\n";
+    decoded = decoded.substr(0,tokenSize);
+
+    std::vector<Token> tokens;
+
+    for(size_t i=0;i+3<decoded.size();i+=4)
+    {
+        Token t;
+
+        t.offset = ((unsigned char)decoded[i]<<8) |
+                   (unsigned char)decoded[i+1];
+
+        t.length = (unsigned char)decoded[i+2];
+        t.next   = decoded[i+3];
+
+        tokens.push_back(t);
+    }
+
+    std::string restored = lz77Decompress(tokens);
+
+    std::ofstream out(outputFile,std::ios::binary);
+    out<<restored;
 }
