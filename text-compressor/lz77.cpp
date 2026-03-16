@@ -1,14 +1,13 @@
 #include "lz77.h"
 #include <vector>
-#include <algorithm>
 
 const int WINDOW = 4096;
 const int LOOK = 18;
-const int HASH_SIZE = 65536;
+const int HASH = 65536;
 
 inline int hash3(const std::string& s,int i)
 {
-    return ((s[i]<<8) ^ (s[i+1]<<4) ^ s[i+2]) & (HASH_SIZE-1);
+    return ((s[i]<<8) ^ (s[i+1]<<4) ^ s[i+2]) & (HASH-1);
 }
 
 std::vector<Token> lz77Compress(const std::string& input)
@@ -22,7 +21,7 @@ std::vector<Token> lz77Compress(const std::string& input)
         return tokens;
     }
 
-    std::vector<int> head(HASH_SIZE,-1);
+    std::vector<int> head(HASH,-1);
     std::vector<int> prev(input.size(),-1);
 
     int pos = 0;
@@ -37,13 +36,11 @@ std::vector<Token> lz77Compress(const std::string& input)
             int h = hash3(input,pos);
 
             int candidate = head[h];
-
             int depth = 0;
-            const int MAX_CHAIN = 64;
 
             while(candidate != -1 &&
                   pos - candidate <= WINDOW &&
-                  depth < MAX_CHAIN)
+                  depth < 64)
             {
                 int length = 0;
 
