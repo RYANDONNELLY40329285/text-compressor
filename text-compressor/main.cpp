@@ -1,26 +1,28 @@
 #include <iostream>
-#include <string>
-#include "file_utils.h"
 #include "huffman.h"
 
-int main()
+int main(int argc, char* argv[])
 {
-    std::string text = readFile("input.txt");
+    if(argc < 4)
+    {
+        std::cout<<"Usage:\n";
+        std::cout<<"compressor compress input.txt output.huff\n";
+        std::cout<<"compressor decompress input.huff output.txt\n";
+        return 1;
+    }
+
+    std::string mode = argv[1];
+    std::string input = argv[2];
+    std::string output = argv[3];
 
     Huffman h;
 
-    std::string encoded = h.compress(text);
+    if(mode == "compress")
+        h.compressFile(input,output);
 
-    std::cout << "\nEncoded bits:\n";
-    std::cout << encoded << "\n";
+    else if(mode == "decompress")
+        h.decompressFile(input,output);
 
-    std::string decoded = h.decompress(encoded);
-
-    std::cout << "\nDecoded text:\n";
-    std::cout << decoded << "\n";
-
-    std::cout << "\nOriginal size: " << text.size() << " bytes\n";
-    std::cout << "Encoded bits: " << encoded.size() << "\n";
-
-    return 0;
+    else
+        std::cout<<"Unknown command\n";
 }

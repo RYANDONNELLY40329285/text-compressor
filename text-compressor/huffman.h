@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
+#include <unordered_map>
 
-struct Node {
+struct Node
+{
     char ch;
     int freq;
     Node* left;
@@ -16,10 +18,12 @@ struct Node {
     }
 };
 
-class Huffman {
+class Huffman
+{
 public:
-    Node* root = nullptr;
+    void compressFile(const std::string& inputFile,
+                      const std::string& outputFile);
 
-    std::string compress(const std::string& text);
-    std::string decompress(const std::string& encoded);
+    void decompressFile(const std::string& inputFile,
+                        const std::string& outputFile);
 };
